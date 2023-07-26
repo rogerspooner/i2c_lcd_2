@@ -36,6 +36,7 @@ static const char *TAG = "i2c-simple-example";
 
 #define MPU9250_PWR_MGMT_1_REG_ADDR         0x6B        /*!< Register addresses of the power managment register */
 #define MPU9250_RESET_BIT                   7
+#define LCD_DISPLAY_ADDR                    0x27        /*!< Slave address of the LCD display */
 
 /**
  * @brief Write a byte to a MPU9250 sensor register
@@ -73,6 +74,52 @@ static esp_err_t i2c_master_init(void)
     return i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
 }
 
+static esp_err_t init_lcd_display(void)
+{  /* THIS WON'T WORK */
+    esp_err_t ret;
+    uint8_t write_buf[] = {
+         0x01 // clear screen, 
+        ,0x0F // display on, cursor on
+        ,0x02 // home
+        ,0x06 // entry mode set reading left to right
+        ,0x80 // set DDRAM address to 0x00 ready for text
+    };
+    ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+
+    /*
+    The HLF8574T chip is an 8 bit expander from I2C to parallel. But the LCD display requires about 11 pins.
+    Fortunately it has a 4 bit mode, so we can probably manage with the 8 bits available.
+    Only the most significant nybble is used in 4 bit mode.
+    "Function set" command needs the key bits in the most significant nybble too, although  it also takes less critical data in the least significant nybble.
+    The other 4 bits from the 8574T chip are used for:
+    - P0 = register select. Like a 1 bit address bus for the LCD.
+    - P1 = read/write. 0 = write, 1 = read
+    - P2 = enable operation
+    It looks like the sequence to write data to the LCD will be by many i2c writes:
+    - write to address of i2c chip (0x27)
+    - assert 4 bits in upper half of byte. In lower half, correct register select and read/write but not enable operation yet.
+    - same byte but asserting enable
+    - same byte but de-asserting enable
+    - assert least signficant 4 bits in upper half of byte. In lower half, same routine as bove.
+    - enable
+    - de-assert enable
+    - repeat for further bytes.
+    
+    References
+    https://components101.com/sites/default/files/component_datasheet/16x2%20LCD%20Datasheet.pdf
+    https://www.openhacks.com/uploadsproductos/eone-1602a1.pdf
+    https://www.ti.com/lit/ds/symlink/pcf8574.pdf
+    https://forum.microchip.com/s/topic/a5C3l000000MYoLEAW/t363873
+    https://github.com/fdebrabander/Arduino-LiquidCrystal-I2C-library/blob/master/LiquidCrystal_I2C.cpp#L233
+
+    */
+    return ret;
+}
+
+static esp_err_t write_lcd_display(char *str)
+{
+    return ESP_FAIL;
+}
 
 void app_main(void)
 {
@@ -88,6 +135,7 @@ void app_main(void)
     /* Demonstrate writing */
     while (true)
     {
+        /*
         ESP_LOGI(TAG, "Testing all I2C addresses");
         for (uint8_t addr = 0x26; addr < 0x7F; addr++)
         { esp_err_t err = mpu9250_register_write_byte(addr);
@@ -97,7 +145,10 @@ void app_main(void)
             ets_delay_us(100);
             if (addr == 0x28) addr = 0x67; // expecting to find address 0x27 and 0x68
         }
-        ESP_LOGI(TAG, "Finished");
+        */
+        ESP_LOGI(TAG, "Finished scanning. Now for LCD display");
+        init_lcd_display();
+        write_lcd_display("Hello World");
         vTaskDelay(5000 / portTICK_PERIOD_MS); // wait 5s
     }
 
