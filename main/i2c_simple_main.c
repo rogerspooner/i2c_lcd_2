@@ -89,12 +89,13 @@ void app_main(void)
     while (true)
     {
         ESP_LOGI(TAG, "Testing all I2C addresses");
-        for (uint8_t addr = 0; addr < 0x7F; addr++)
+        for (uint8_t addr = 0x26; addr < 0x7F; addr++)
         { esp_err_t err = mpu9250_register_write_byte(addr);
             if (err == ESP_OK)
             { ESP_LOGI(TAG, "Device x%x written", addr);
             }
             ets_delay_us(100);
+            if (addr == 0x28) addr = 0x67; // expecting to find address 0x27 and 0x68
         }
         ESP_LOGI(TAG, "Finished");
         vTaskDelay(5000 / portTICK_PERIOD_MS); // wait 5s
