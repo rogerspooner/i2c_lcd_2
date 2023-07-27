@@ -151,7 +151,7 @@ static esp_err_t lcd_send_i2c_4bit(uint8_t *data, size_t size, uint8_t register_
         pRead++;
     }
     data4bit_size = pWrite - data4bit;
-    logDumpBytes(TAG, "lcd_send_i2c as 8bit:", data, size);
+    logDumpBytes(TAG, "lcd_send_i2c original 8bit:", data, size);
     logDumpBytes(TAG, "lcd_send_i2c_4bit: ", data4bit, data4bit_size);
     ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, data4bit, data4bit_size, I2C_MASTER_TIMEOUT_TICKS);
     if (buf_malloced)
@@ -183,9 +183,10 @@ static esp_err_t lcd_set_4bit_mode(void)
 static esp_err_t lcd_init_display(void)
 {   esp_err_t ret;
     uint8_t write_buf[] = {
-         0x01 // clear screen, 
         ,0x0F // display on, cursor on
-        ,0x02 // home
+        ,0x2c // function set, 4 bit mode, 2 lines, 5x11 font
+        //,0x01 // clear screen,  (slow)
+        //,0x02 // home (slow)
         ,0x06 // entry mode set reading left to right
         ,0x80 // set DDRAM address to 0x00 ready for text
     };
@@ -198,6 +199,7 @@ static esp_err_t lcd_write(char *str)
     esp_err_t ret;
     if (strlen(str) > 40)
         return ESP_ERR_INVALID_SIZE;
+    ESP_LOGI(TAG, "lcd_write: %s", str);
     ret = lcd_send_i2c_4bit((uint8_t*) str, strlen(str), LCD_DATA_REGISTER);
     return ret;
 }
@@ -230,10 +232,12 @@ void app_main(void)
         if (err != ESP_OK)
         { ESP_LOGE(TAG, "Error x%x setting 4 bit mode", err);
         }
+        /*
         err = lcd_init_display();
         if (err != ESP_OK)
         { ESP_LOGE(TAG, "Error x%x initializing display", err);
         }
+        */
         err = lcd_write("Hello World");
         if (err != ESP_OK)
         { ESP_LOGE(TAG, "Error x%x writing to display", err);
