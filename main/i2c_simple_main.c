@@ -17,6 +17,7 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 #include <stdio.h>
+#include <string.h>
 #include "esp_log.h"
 #include "driver/i2c.h"
 #include <rom/ets_sys.h>
@@ -29,27 +30,33 @@ static const char *TAG = "i2c-simple-example";
 #define I2C_MASTER_FREQ_HZ          40000                     /*!< I2C master clock frequency */
 #define I2C_MASTER_TX_BUF_DISABLE   0                          /*!< I2C master doesn't need buffer */
 #define I2C_MASTER_RX_BUF_DISABLE   0                          /*!< I2C master doesn't need buffer */
-#define I2C_MASTER_TIMEOUT_MS       1000
+#define I2C_MASTER_TIMEOUT_TICKS       1
 
-#define MPU9250_SENSOR_ADDR                 0x68        /*!< Slave address of the MPU9250 sensor */
-#define MPU9250_WHO_AM_I_REG_ADDR           0x75        /*!< Register addresses of the "who am I" register */
-
-#define MPU9250_PWR_MGMT_1_REG_ADDR         0x6B        /*!< Register addresses of the power managment register */
-#define MPU9250_RESET_BIT                   7
 #define LCD_DISPLAY_ADDR                    0x27        /*!< Slave address of the LCD display */
+#define LCD_ENABLECLOCK_4BIT                0x04        /* Flag for enable (clock) bit in mapping in HLF8574T chip to LCD adaptor */
+#define LCD_READWRITE_4BIT                  0x02        /* Flag for read/write bit in mapping in HLF8574T chip to LCD adaptor */
+#define LCD_REGISTER_SELECT_4BIT            0x01        /* Flag for register select bit in mapping in HLF8574T chip to LCD adaptor */
+#define LCD_COMMAND_REGISTER                0x00        /* Flag for command register in mapping in 1602 LCD */
+#define LCD_DATA_REGISTER                   0x01        /* Flag for data register in mapping in 1602 LCD */
 
-/**
- * @brief Write a byte to a MPU9250 sensor register
- */
-static esp_err_t mpu9250_register_write_byte(uint8_t addr)
+#define BLACK_BUTTON_GPIO 26
+#define GREEN_LED_GPIO 5
+
+// example of use: (TAG, "lcd_send_i2c_4bit", data4bit, data4bit_size);
+static void logDumpBytes(const char *tag, const char *msg, uint8_t *data, size_t size)
 {
-    esp_err_t ret;
-    uint8_t write_buf[5] = {0x55, 0x4d, 0x33, 0x0f, 0xff}; // binary bit patterns 01010101 and 01001101 etc
-
-    ret = i2c_master_write_to_device(I2C_MASTER_NUM, addr, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
-    if (ret == ESP_OK)
-        ESP_LOGI(TAG, "Data written OK to address x%x", addr);
-    return ret;
+    static char buf[1024];
+    char *p = buf;
+    sprintf(p, "%s: ", msg);
+    p += strlen(p);
+    if (size > 32)
+        size = 32;
+    for (int i = 0; i < size; i++)
+    {
+        sprintf(p, "%02x ", data[i]);
+        p += strlen(p);
+    }
+    ESP_LOGI(tag, "%s", buf);
 }
 
 /**
@@ -74,20 +81,10 @@ static esp_err_t i2c_master_init(void)
     return i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
 }
 
-static esp_err_t init_lcd_display(void)
-{  /* THIS WON'T WORK */
-    esp_err_t ret;
-    uint8_t write_buf[] = {
-         0x01 // clear screen, 
-        ,0x0F // display on, cursor on
-        ,0x02 // home
-        ,0x06 // entry mode set reading left to right
-        ,0x80 // set DDRAM address to 0x00 ready for text
-    };
-    ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
-
-    /*
-    The HLF8574T chip is an 8 bit expander from I2C to parallel. But the LCD display requires about 11 pins.
+/**
+ * @brief Send data to the LCD display in 4 bit mode through the 8-bit expander on i2c.
+ * 
+ * The HLF8574T chip is an 8 bit expander from I2C to parallel. But the LCD display requires about 11 pins.
     Fortunately it has a 4 bit mode, so we can probably manage with the 8 bits available.
     Only the most significant nybble is used in 4 bit mode.
     "Function set" command needs the key bits in the most significant nybble too, although  it also takes less critical data in the least significant nybble.
@@ -106,35 +103,117 @@ static esp_err_t init_lcd_display(void)
     - repeat for further bytes.
     
     References
-    https://components101.com/sites/default/files/component_datasheet/16x2%20LCD%20Datasheet.pdf
-    https://www.openhacks.com/uploadsproductos/eone-1602a1.pdf
-    https://www.ti.com/lit/ds/symlink/pcf8574.pdf
-    https://forum.microchip.com/s/topic/a5C3l000000MYoLEAW/t363873
-    https://github.com/fdebrabander/Arduino-LiquidCrystal-I2C-library/blob/master/LiquidCrystal_I2C.cpp#L233
-
+    - https://components101.com/sites/default/files/component_datasheet/16x2%20LCD%20Datasheet.pdf
+    - https://www.openhacks.com/uploadsproductos/eone-1602a1.pdf
+    - https://www.ti.com/lit/ds/symlink/pcf8574.pdf
+    - https://forum.microchip.com/s/topic/a5C3l000000MYoLEAW/t363873
+    - https://github.com/fdebrabander/Arduino-LiquidCrystal-I2C-library/blob/master/LiquidCrystal_I2C.cpp#L233
     */
+static esp_err_t lcd_send_i2c_4bit(uint8_t *data, size_t size, uint8_t register_select)
+{
+#define INITIAL_DATA4BIT_SIZE 256
+    esp_err_t ret;
+    bool buf_malloced = false;
+    static uint8_t staticData4bit[INITIAL_DATA4BIT_SIZE];
+    static uint8_t* data4bit = staticData4bit;
+    int data4bit_size = size*6;
+    uint8_t *pWrite, *pRead, *pEnd;
+    if ((size*6) < INITIAL_DATA4BIT_SIZE )
+        data4bit = staticData4bit;
+    else
+    {  
+        data4bit = (uint8_t*) malloc(size*2+16);
+        buf_malloced = true;
+    }
+    pWrite = data4bit;
+    pRead = data;
+    pEnd = data + size;
+    while (pRead < pEnd)
+    {
+        *pWrite= (*pRead & 0xF0); // most significant 4 bits, in upper half of byte
+        if (register_select)
+            *pWrite |= LCD_REGISTER_SELECT_4BIT;
+        *(pWrite+1) = *pWrite;
+        pWrite++;
+        *pWrite |= LCD_ENABLECLOCK_4BIT;
+        *(pWrite+1) = *pWrite;
+        pWrite++;
+        *pWrite++ ^= LCD_ENABLECLOCK_4BIT;
+        *pWrite = (*pRead & 0x0F) << 4; // least significant 4 bits, in upper half of byte
+        if (register_select)
+            *pWrite |= LCD_REGISTER_SELECT_4BIT;
+        *(pWrite+1) = *pWrite;
+        pWrite++;
+        *pWrite |= LCD_ENABLECLOCK_4BIT;
+        *(pWrite+1) = *pWrite;
+        pWrite++;
+        *pWrite++ ^= LCD_ENABLECLOCK_4BIT;
+        pRead++;
+    }
+    data4bit_size = pWrite - data4bit;
+    logDumpBytes(TAG, "lcd_send_i2c as 8bit:", data, size);
+    logDumpBytes(TAG, "lcd_send_i2c_4bit: ", data4bit, data4bit_size);
+    ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, data4bit, data4bit_size, I2C_MASTER_TIMEOUT_TICKS);
+    if (buf_malloced)
+        free(data4bit);
     return ret;
 }
 
-static esp_err_t write_lcd_display(char *str)
+static esp_err_t lcd_set_4bit_mode(void)
 {
-    return ESP_FAIL;
+    esp_err_t ret;
+    uint8_t write_buf[] = {
+         0x30 // set 8 bit mode , in case we were previously in 4 bit mode, first half
+        ,0x30 | LCD_ENABLECLOCK_4BIT
+        ,0x30
+        ,0x30 // set 8 bit mode , in case we were previously in 4 bit mode, second half
+        ,0x30 | LCD_ENABLECLOCK_4BIT
+        ,0x30
+        ,0x30 // set 8 bit mode , in case we were previously in 4 bit mode, in case we were 1 byte in to a 4 bit command
+        ,0x30 | LCD_ENABLECLOCK_4BIT
+        ,0x30
+        ,0x20 // set 4 bit mode
+        ,0x20 | LCD_ENABLECLOCK_4BIT
+        ,0x20
+    };
+    ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_TICKS);
+    return ret;
+}
+
+static esp_err_t lcd_init_display(void)
+{   esp_err_t ret;
+    uint8_t write_buf[] = {
+         0x01 // clear screen, 
+        ,0x0F // display on, cursor on
+        ,0x02 // home
+        ,0x06 // entry mode set reading left to right
+        ,0x80 // set DDRAM address to 0x00 ready for text
+    };
+    ret = lcd_send_i2c_4bit(write_buf, sizeof(write_buf), LCD_COMMAND_REGISTER);
+    return ret;
+}
+
+static esp_err_t lcd_write(char *str)
+{
+    esp_err_t ret;
+    if (strlen(str) > 40)
+        return ESP_ERR_INVALID_SIZE;
+    ret = lcd_send_i2c_4bit((uint8_t*) str, strlen(str), LCD_DATA_REGISTER);
+    return ret;
 }
 
 void app_main(void)
 {
-    // uint8_t data[2];
-    ESP_ERROR_CHECK(i2c_master_init());
-    ESP_LOGI(TAG, "I2C initialized successfully");
-
-    /* Read the MPU9250 WHO_AM_I register, on power up the register should have the value 0x71 * /
-    ESP_ERROR_CHECK(mpu9250_register_read(MPU9250_WHO_AM_I_REG_ADDR, data, 1));
-    ESP_LOGI(TAG, "WHO_AM_I = %X", data[0]);
-    */
-
-    /* Demonstrate writing */
+    esp_err_t err;
+    err = i2c_master_init();
+    if (err != ESP_OK)
+    { ESP_LOGE(TAG, "Error x%x initializing I2C", err);
+    }
+    
     while (true)
     {
+        gpio_set_direction(GREEN_LED_GPIO, GPIO_MODE_OUTPUT);
+        gpio_set_level(GREEN_LED_GPIO, 0);
         /*
         ESP_LOGI(TAG, "Testing all I2C addresses");
         for (uint8_t addr = 0x26; addr < 0x7F; addr++)
@@ -146,10 +225,34 @@ void app_main(void)
             if (addr == 0x28) addr = 0x67; // expecting to find address 0x27 and 0x68
         }
         */
-        ESP_LOGI(TAG, "Finished scanning. Now for LCD display");
-        init_lcd_display();
-        write_lcd_display("Hello World");
-        vTaskDelay(5000 / portTICK_PERIOD_MS); // wait 5s
+        ESP_LOGI(TAG, "Setting 4 bit mode on LCD by I2C");
+        err = lcd_set_4bit_mode();
+        if (err != ESP_OK)
+        { ESP_LOGE(TAG, "Error x%x setting 4 bit mode", err);
+        }
+        err = lcd_init_display();
+        if (err != ESP_OK)
+        { ESP_LOGE(TAG, "Error x%x initializing display", err);
+        }
+        err = lcd_write("Hello World");
+        if (err != ESP_OK)
+        { ESP_LOGE(TAG, "Error x%x writing to display", err);
+        }
+        else {
+           ESP_LOGI(TAG, "Wrote to display");
+        }
+        gpio_set_level(GREEN_LED_GPIO, 1);
+        gpio_set_direction(BLACK_BUTTON_GPIO, GPIO_MODE_INPUT);
+        gpio_pullup_en(BLACK_BUTTON_GPIO);
+        ESP_LOGI(TAG, "Press the black button again");
+        while (gpio_get_level(BLACK_BUTTON_GPIO) == 1) // wait for button press
+        { vTaskDelay(10); 
+        }
+        vTaskDelay(10); 
+        while (gpio_get_level(BLACK_BUTTON_GPIO) == 0) // wait for button press
+        { vTaskDelay(10); 
+        }
+        gpio_set_level(GREEN_LED_GPIO, 0);
     }
 
     ESP_ERROR_CHECK(i2c_driver_delete(I2C_MASTER_NUM));
