@@ -163,27 +163,44 @@ static esp_err_t lcd_set_4bit_mode(void)
 {
     esp_err_t ret;
     uint8_t write_buf[] = {
-         0x30 // set 8 bit mode , in case we were previously in 4 bit mode, first half
-        ,0x30 | LCD_ENABLECLOCK_4BIT
+         0x30 | LCD_ENABLECLOCK_4BIT, 0x30 // set 8 bit mode , in case we were previously in 4 bit mode, first half. Clock on falling edge
+        ,0x30 | LCD_ENABLECLOCK_4BIT, 0x30 // set 8 bit mode again. Hopefully ignored
+        ,0x00 // clear all lines down
+    };
+    uint8_t write_buf2[] = {
+         0x30 | LCD_ENABLECLOCK_4BIT // set 8 bit mode , in case we were previously in 4 bit mode, second half
+        ,0x30 // hold after clock edge
+        ,0x30 | LCD_ENABLECLOCK_4BIT // set 8 bit mode , in case we were previously in 4 bit mode, in case we were 1 byte in to a 4 bit command
         ,0x30
-        ,0x30 // set 8 bit mode , in case we were previously in 4 bit mode, second half
-        ,0x30 | LCD_ENABLECLOCK_4BIT
-        ,0x30
-        ,0x30 // set 8 bit mode , in case we were previously in 4 bit mode, in case we were 1 byte in to a 4 bit command
-        ,0x30 | LCD_ENABLECLOCK_4BIT
-        ,0x30
-        ,0x20 // set 4 bit mode
-        ,0x20 | LCD_ENABLECLOCK_4BIT
+        ,0x20 | LCD_ENABLECLOCK_4BIT  // set 4 bit mode
         ,0x20
+        // now in 4 bit mode
+        ,0x20 | LCD_ENABLECLOCK_4BIT ,0x20  // set 4 bit mode again to reconfigure line size and font
+        ,0x80 | LCD_ENABLECLOCK_4BIT ,0x80 // LSB. N=1 > 2 line display. F=0 => 5x8 pixel chars
+        ,0x00 | LCD_ENABLECLOCK_4BIT ,0x20 // Display off
+        ,0x80 | LCD_ENABLECLOCK_4BIT ,0x80 // ? LSB from HD47780 datasheet
+        ,0x00 | LCD_ENABLECLOCK_4BIT ,0x00 // Display off. init from HD47780 data sheet
+        ,0x10 | LCD_ENABLECLOCK_4BIT, 0x10  //  LSB
+        ,0x00 | LCD_ENABLECLOCK_4BIT, 0x80  // ? init from data sheet
+        ,0x60 | LCD_ENABLECLOCK_4BIT, 0x60  // Init I/D=increment, S= no shift 
+        ,0x00 | LCD_ENABLECLOCK_4BIT, 0x80 // Cursor or shift Display
+        ,0xF0 | LCD_ENABLECLOCK_4BIT,0xF0 // D=display on, C=cursor on, B=blink on
+        ,0x00 | LCD_ENABLECLOCK_4BIT, 0x00 // Home
+        ,0x20 | LCD_ENABLECLOCK_4BIT, 0x20 // Home LSB
+        ,0x00 // clear all bits down
     };
     ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_TICKS);
+    logDumpBytes(TAG, "init LCD setting bit mode",write_buf, sizeof(write_buf));
+    vTaskDelay(1); // wait more than 4.1ms
+    ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, write_buf2, sizeof(write_buf2), I2C_MASTER_TIMEOUT_TICKS);
+    logDumpBytes(TAG, "init LCD setting bit mode pt2",write_buf2, sizeof(write_buf2));
     return ret;
 }
 
 static esp_err_t lcd_init_display(void)
 {   esp_err_t ret;
     uint8_t write_buf[] = {
-        ,0x0F // display on, cursor on
+        0x0F // display on, cursor on
         ,0x2c // function set, 4 bit mode, 2 lines, 5x11 font
         //,0x01 // clear screen,  (slow)
         //,0x02 // home (slow)
