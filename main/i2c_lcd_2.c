@@ -175,47 +175,44 @@ static esp_err_t lcd_set_4bit_mode(void)
     uint8_t write_buf2[] = {
          0x30 | LCD_ENABLECLOCK_4BIT // set 8 bit mode , in case we were previously in 4 bit mode, second half
         ,0x30 // hold after clock edge
-        ,0x30 | LCD_ENABLECLOCK_4BIT // set 8 bit mode , in case we were previously in 4 bit mode, in case we were 1 byte in to a 4 bit command
-        ,0x30
-        ,0x20 | LCD_ENABLECLOCK_4BIT  // set 4 bit mode
-        ,0x20
+        ,0x30 | LCD_ENABLECLOCK_4BIT, 0x30 // set 8 bit mode , in case we were previously in 4 bit mode, in case we were 1 byte in to a 4 bit command
+        ,0x20 | LCD_ENABLECLOCK_4BIT, 0x20  // set 4 bit mode
+        ,0x00 // clear all lines down
         // now in 4 bit mode
-        ,0x20 | LCD_ENABLECLOCK_4BIT ,0x20  // set 4 bit mode again to reconfigure line size and font
-        ,0x80 | LCD_ENABLECLOCK_4BIT ,0x80 // LSB. N=1 > 2 line display. F=0 => 5x8 pixel chars
-        ,0x00 | LCD_ENABLECLOCK_4BIT ,0x20 // Display off
-        ,0x80 | LCD_ENABLECLOCK_4BIT ,0x80 // ? LSB from HD47780 datasheet
-        ,0x00 | LCD_ENABLECLOCK_4BIT ,0x00 // Display off. init from HD47780 data sheet
-        ,0x10 | LCD_ENABLECLOCK_4BIT, 0x10  //  LSB
-        ,0x00 | LCD_ENABLECLOCK_4BIT, 0x80  // ? init from data sheet
-        ,0x60 | LCD_ENABLECLOCK_4BIT, 0x60  // Init I/D=increment, S= no shift 
-        ,0x00 | LCD_ENABLECLOCK_4BIT, 0x80 // Cursor or shift Display
-        ,0xF0 | LCD_ENABLECLOCK_4BIT, 0xF0 // D=display on, C=cursor on, B=blink on
-        ,0x00 | LCD_ENABLECLOCK_4BIT, 0x00 // Home
-        ,0x2 | LCD_ENABLECLOCK_4BIT | LCD_BACKLIGHT , 0x20 | LCD_BACKLIGHT // Home LSB and enable backlight
-        ,0x00 // clear all bits down
     };
     ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_TICKS);
     logDumpBytes(TAG, "init LCD setting bit mode",write_buf, sizeof(write_buf));
-    vTaskDelay(1); // wait more than 4.1ms
+    vTaskDelay(2); // wait more than 4.1ms
     ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, write_buf2, sizeof(write_buf2), I2C_MASTER_TIMEOUT_TICKS);
     logDumpBytes(TAG, "init LCD setting bit mode pt2",write_buf2, sizeof(write_buf2));
     return ret;
 }
-/*
+
 static esp_err_t lcd_init_display(void)
 {   esp_err_t ret;
-    uint8_t write_buf[] = {
+    uint8_t init_buf[] = {
+         0x28  // set 4 bit mode again to reconfigure line size and font. N=1 > 2 line display. F=0 => 5x8 pixel chars
+        ,0x08  // Display off (from HD47780 datasheet)
+        ,0x01  // Display off. init from HD47780 data sheet
+        ,0x06  // Init I/D=increment, S= no shift 
+        ,0x0F  // Cursor or shift Display.  D=display on, C=cursor on, B=blink on
+        ,0x02  //  Home LSB and enable backlight
+        ,0x80  // set DDRAM address to 0x00 ready for text
+    };
+    /*
+        uint8_t write_buf[] = {
         0x0F // display on, cursor on
         ,0x2c // function set, 4 bit mode, 2 lines, 5x11 font
         //,0x01 // clear screen,  (slow)
         //,0x02 // home (slow)
         ,0x06 // entry mode set reading left to right
         ,0x80 // set DDRAM address to 0x00 ready for text
-    };
-    ret = lcd_send_i2c_4bit(write_buf, sizeof(write_buf), LCD_COMMAND_REGISTER);
+        };
+    */
+    ret = lcd_send_i2c_4bit(init_buf, sizeof(init_buf), LCD_COMMAND_REGISTER);
     return ret;
 }
-*/
+
 
 static esp_err_t lcd_write(char *str)
 {
@@ -238,7 +235,7 @@ void app_main(void)
     while (true)
     {
         gpio_set_direction(GREEN_LED_GPIO, GPIO_MODE_OUTPUT);
-        gpio_set_level(GREEN_LED_GPIO, 0);
+        gpio_set_level(GREEN_LED_GPIO, 1);
         /*
         ESP_LOGI(TAG, "Testing all I2C addresses");
         for (uint8_t addr = 0x26; addr < 0x7F; addr++)
@@ -252,15 +249,9 @@ void app_main(void)
         */
         ESP_LOGI(TAG, "Setting 4 bit mode on LCD by I2C");
         err = lcd_set_4bit_mode();
-        if (err != ESP_OK)
-        { ESP_LOGE(TAG, "Error x%x setting 4 bit mode", err);
-        }
-        /*
+        if (err != ESP_OK) ESP_LOGE(TAG, "Error x%x setting 4 bit mode", err);
         err = lcd_init_display();
-        if (err != ESP_OK)
-        { ESP_LOGE(TAG, "Error x%x initializing display", err);
-        }
-        */
+        if (err != ESP_OK) ESP_LOGE(TAG, "Error x%x initializing display", err);
         err = lcd_write("Hello World");
         if (err != ESP_OK)
         { ESP_LOGE(TAG, "Error x%x writing to display", err);
@@ -268,18 +259,18 @@ void app_main(void)
         else {
            ESP_LOGI(TAG, "Wrote to display");
         }
-        gpio_set_level(GREEN_LED_GPIO, 1);
+        gpio_set_level(GREEN_LED_GPIO, 0); // active low
         gpio_set_direction(BLACK_BUTTON_GPIO, GPIO_MODE_INPUT);
         gpio_pullup_en(BLACK_BUTTON_GPIO);
         ESP_LOGI(TAG, "Press the black button again");
         while (gpio_get_level(BLACK_BUTTON_GPIO) == 1) // wait for button press
         { vTaskDelay(10); 
         }
-        vTaskDelay(10); 
-        while (gpio_get_level(BLACK_BUTTON_GPIO) == 0) // wait for button press
-        { vTaskDelay(10); 
+        gpio_set_level(GREEN_LED_GPIO, 1); // active low
+        vTaskDelay(2);  // debounce
+        while (gpio_get_level(BLACK_BUTTON_GPIO) == 0) // wait for button release
+        { vTaskDelay(2); 
         }
-        gpio_set_level(GREEN_LED_GPIO, 0);
     }
 
     ESP_ERROR_CHECK(i2c_driver_delete(I2C_MASTER_NUM));
