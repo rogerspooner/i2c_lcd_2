@@ -40,10 +40,11 @@ static const char *TAG = "i2c-simple-example";
 
 #define I2C_MASTER_SCL_IO           22      /*!< GPIO number used for I2C master clock */
 #define I2C_MASTER_SDA_IO           21      /*!< GPIO number used for I2C master data  */
-#define BLACK_BUTTON_GPIO 2
+#define BLACK_BUTTON_GPIO 0
 #define GREEN_LED_GPIO 5
 
 bool gBackLight_en = 1;
+int lineCount = 0;
 
 // example of use: (TAG, "lcd_send_i2c_4bit", data4bit, data4bit_size);
 static void logDumpBytes(const char *tag, const char *msg, uint8_t *data, size_t size)
@@ -136,25 +137,31 @@ static esp_err_t lcd_send_i2c_4bit(uint8_t *data, size_t size, uint8_t register_
         *pWrite= (*pRead & 0xF0); // most significant 4 bits, in upper half of byte
         if (register_select)
             *pWrite |= LCD_REGISTER_SELECT_4BIT;
+        if (gBackLight_en) *pWrite |= LCD_BACKLIGHT;            
         *(pWrite+1) = *pWrite;
         pWrite++;
+        if (gBackLight_en) *pWrite |= LCD_BACKLIGHT;            
         *pWrite |= LCD_ENABLECLOCK_4BIT;
+        if (gBackLight_en) *pWrite |= LCD_BACKLIGHT;            
         *(pWrite+1) = *pWrite;
         pWrite++;
+        if (gBackLight_en) *pWrite |= LCD_BACKLIGHT;            
         *pWrite++ ^= LCD_ENABLECLOCK_4BIT;
         *pWrite = (*pRead & 0x0F) << 4; // least significant 4 bits, in upper half of byte
         if (register_select)
             *pWrite |= LCD_REGISTER_SELECT_4BIT;
+        if (gBackLight_en) *pWrite |= LCD_BACKLIGHT;            
         *(pWrite+1) = *pWrite;
         pWrite++;
+        if (gBackLight_en) *pWrite |= LCD_BACKLIGHT;            
         *pWrite |= LCD_ENABLECLOCK_4BIT;
         *(pWrite+1) = *pWrite;
         pWrite++;
+        if (gBackLight_en) *pWrite |= LCD_BACKLIGHT;            
         *pWrite++ ^= LCD_ENABLECLOCK_4BIT;
         pRead++;
+        if (gBackLight_en) *pWrite |= LCD_BACKLIGHT;            
     }
-    if (gBackLight_en) 
-        *(pWrite - 1) |= LCD_BACKLIGHT;
     data4bit_size = pWrite - data4bit;
     logDumpBytes(TAG, "lcd_send_i2c original 8bit:", data, size);
     logDumpBytes(TAG, "lcd_send_i2c_4bit: ", data4bit, data4bit_size);
@@ -191,35 +198,28 @@ static esp_err_t lcd_set_4bit_mode(void)
 static esp_err_t lcd_init_display(void)
 {   esp_err_t ret;
     uint8_t init_buf[] = {
-         0x28  // set 4 bit mode again to reconfigure line size and font. N=1 > 2 line display. F=0 => 5x8 pixel chars
+         0x28  // Function Set 4 bit mode again to reconfigure line size and font. N=1 > 2 line display. F=0 => 5x8 pixel chars
         ,0x08  // Display off (from HD47780 datasheet)
         ,0x01  // Display off. init from HD47780 data sheet
         ,0x06  // Init I/D=increment, S= no shift 
-        ,0x0F  // Cursor or shift Display.  D=display on, C=cursor on, B=blink on
+        ,0x0c  // Cursor or shift Display.  D=display on, C=cursor off, B=blink off
         ,0x02  //  Home LSB and enable backlight
         ,0x80  // set DDRAM address to 0x00 ready for text
     };
-    /*
-        uint8_t write_buf[] = {
-        0x0F // display on, cursor on
-        ,0x2c // function set, 4 bit mode, 2 lines, 5x11 font
-        //,0x01 // clear screen,  (slow)
-        //,0x02 // home (slow)
-        ,0x06 // entry mode set reading left to right
-        ,0x80 // set DDRAM address to 0x00 ready for text
-        };
-    */
     ret = lcd_send_i2c_4bit(init_buf, sizeof(init_buf), LCD_COMMAND_REGISTER);
     return ret;
 }
 
 
-static esp_err_t lcd_write(char *str)
+static esp_err_t lcd_write(char *str,int linenum)
 {
     esp_err_t ret;
-    if (strlen(str) > 40)
-        return ESP_ERR_INVALID_SIZE;
+    if (strlen(str) > 40) return ESP_ERR_INVALID_SIZE;
     ESP_LOGI(TAG, "lcd_write: %s", str);
+    uint8_t ddaddr_buf[2];
+    ddaddr_buf[0] = 0x80 | (linenum * 0x40);
+    ddaddr_buf[1] = 0x00;
+    ret = lcd_send_i2c_4bit(ddaddr_buf, 1, LCD_COMMAND_REGISTER);
     ret = lcd_send_i2c_4bit((uint8_t*) str, strlen(str), LCD_DATA_REGISTER);
     return ret;
 }
@@ -231,28 +231,19 @@ void app_main(void)
     if (err != ESP_OK)
     { ESP_LOGE(TAG, "Error x%x initializing I2C", err);
     }
-    
+    gpio_set_direction(GREEN_LED_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(GREEN_LED_GPIO, 1);
+    ESP_LOGI(TAG, "Setting 4 bit mode on LCD by I2C");
+    err = lcd_set_4bit_mode();
+    if (err != ESP_OK) ESP_LOGE(TAG, "Error x%x setting 4 bit mode", err);
+    err = lcd_init_display();
+    if (err != ESP_OK) ESP_LOGE(TAG, "Error x%x initializing display", err);
     while (true)
     {
-        gpio_set_direction(GREEN_LED_GPIO, GPIO_MODE_OUTPUT);
-        gpio_set_level(GREEN_LED_GPIO, 1);
-        /*
-        ESP_LOGI(TAG, "Testing all I2C addresses");
-        for (uint8_t addr = 0x26; addr < 0x7F; addr++)
-        { esp_err_t err = mpu9250_register_write_byte(addr);
-            if (err == ESP_OK)
-            { ESP_LOGI(TAG, "Device x%x written", addr);
-            }
-            ets_delay_us(100);
-            if (addr == 0x28) addr = 0x67; // expecting to find address 0x27 and 0x68
-        }
-        */
-        ESP_LOGI(TAG, "Setting 4 bit mode on LCD by I2C");
-        err = lcd_set_4bit_mode();
-        if (err != ESP_OK) ESP_LOGE(TAG, "Error x%x setting 4 bit mode", err);
-        err = lcd_init_display();
-        if (err != ESP_OK) ESP_LOGE(TAG, "Error x%x initializing display", err);
-        err = lcd_write("Hello World");
+        char line1[40];
+        sprintf(line1, "Ahoy Roger %d", lineCount);
+        err = lcd_write(line1,0);
+        err = lcd_write("Press the button", 1);
         if (err != ESP_OK)
         { ESP_LOGE(TAG, "Error x%x writing to display", err);
         }
@@ -269,8 +260,9 @@ void app_main(void)
         gpio_set_level(GREEN_LED_GPIO, 1); // active low
         vTaskDelay(2);  // debounce
         while (gpio_get_level(BLACK_BUTTON_GPIO) == 0) // wait for button release
-        { vTaskDelay(2); 
+        {   vTaskDelay(2); 
         }
+        lineCount++;
     }
 
     ESP_ERROR_CHECK(i2c_driver_delete(I2C_MASTER_NUM));
