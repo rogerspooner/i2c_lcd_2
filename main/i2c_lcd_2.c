@@ -24,8 +24,6 @@
 
 static const char *TAG = "i2c-simple-example";
 
-#define I2C_MASTER_SCL_IO           CONFIG_I2C_MASTER_SCL      /*!< GPIO number used for I2C master clock */
-#define I2C_MASTER_SDA_IO           CONFIG_I2C_MASTER_SDA      /*!< GPIO number used for I2C master data  */
 #define I2C_MASTER_NUM              0                          /*!< I2C master i2c port number, the number of i2c peripheral interfaces available will depend on the chip */
 #define I2C_MASTER_FREQ_HZ          40000                     /*!< I2C master clock frequency */
 #define I2C_MASTER_TX_BUF_DISABLE   0                          /*!< I2C master doesn't need buffer */
@@ -38,9 +36,14 @@ static const char *TAG = "i2c-simple-example";
 #define LCD_REGISTER_SELECT_4BIT            0x01        /* Flag for register select bit in mapping in HLF8574T chip to LCD adaptor */
 #define LCD_COMMAND_REGISTER                0x00        /* Flag for command register in mapping in 1602 LCD */
 #define LCD_DATA_REGISTER                   0x01        /* Flag for data register in mapping in 1602 LCD */
+#define LCD_BACKLIGHT                       0x08        /* P3 of the i2c expander chip goes to the light. */
 
-#define BLACK_BUTTON_GPIO 26
+#define I2C_MASTER_SCL_IO           22      /*!< GPIO number used for I2C master clock */
+#define I2C_MASTER_SDA_IO           21      /*!< GPIO number used for I2C master data  */
+#define BLACK_BUTTON_GPIO 2
 #define GREEN_LED_GPIO 5
+
+bool gBackLight_en = 1;
 
 // example of use: (TAG, "lcd_send_i2c_4bit", data4bit, data4bit_size);
 static void logDumpBytes(const char *tag, const char *msg, uint8_t *data, size_t size)
@@ -150,6 +153,8 @@ static esp_err_t lcd_send_i2c_4bit(uint8_t *data, size_t size, uint8_t register_
         *pWrite++ ^= LCD_ENABLECLOCK_4BIT;
         pRead++;
     }
+    if (gBackLight_en) 
+        *(pWrite - 1) |= LCD_BACKLIGHT;
     data4bit_size = pWrite - data4bit;
     logDumpBytes(TAG, "lcd_send_i2c original 8bit:", data, size);
     logDumpBytes(TAG, "lcd_send_i2c_4bit: ", data4bit, data4bit_size);
@@ -184,9 +189,9 @@ static esp_err_t lcd_set_4bit_mode(void)
         ,0x00 | LCD_ENABLECLOCK_4BIT, 0x80  // ? init from data sheet
         ,0x60 | LCD_ENABLECLOCK_4BIT, 0x60  // Init I/D=increment, S= no shift 
         ,0x00 | LCD_ENABLECLOCK_4BIT, 0x80 // Cursor or shift Display
-        ,0xF0 | LCD_ENABLECLOCK_4BIT,0xF0 // D=display on, C=cursor on, B=blink on
+        ,0xF0 | LCD_ENABLECLOCK_4BIT, 0xF0 // D=display on, C=cursor on, B=blink on
         ,0x00 | LCD_ENABLECLOCK_4BIT, 0x00 // Home
-        ,0x20 | LCD_ENABLECLOCK_4BIT, 0x20 // Home LSB
+        ,0x2 | LCD_ENABLECLOCK_4BIT | LCD_BACKLIGHT , 0x20 | LCD_BACKLIGHT // Home LSB and enable backlight
         ,0x00 // clear all bits down
     };
     ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_TICKS);
@@ -196,7 +201,7 @@ static esp_err_t lcd_set_4bit_mode(void)
     logDumpBytes(TAG, "init LCD setting bit mode pt2",write_buf2, sizeof(write_buf2));
     return ret;
 }
-
+/*
 static esp_err_t lcd_init_display(void)
 {   esp_err_t ret;
     uint8_t write_buf[] = {
@@ -210,6 +215,7 @@ static esp_err_t lcd_init_display(void)
     ret = lcd_send_i2c_4bit(write_buf, sizeof(write_buf), LCD_COMMAND_REGISTER);
     return ret;
 }
+*/
 
 static esp_err_t lcd_write(char *str)
 {
