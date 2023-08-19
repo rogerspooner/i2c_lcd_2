@@ -22,6 +22,8 @@
 #include "driver/i2c.h"
 #include <rom/ets_sys.h>
 
+#include "stepper_motor.h"
+
 static const char *TAG = "i2c-simple-example";
 
 #define I2C_MASTER_NUM              0                          /*!< I2C master i2c port number, the number of i2c peripheral interfaces available will depend on the chip */
@@ -46,6 +48,7 @@ static const char *TAG = "i2c-simple-example";
 bool gBackLight_en = 1;
 int lineCount = 0;
 
+/*
 // example of use: (TAG, "lcd_send_i2c_4bit", data4bit, data4bit_size);
 static void logDumpBytes(const char *tag, const char *msg, uint8_t *data, size_t size)
 {
@@ -62,6 +65,7 @@ static void logDumpBytes(const char *tag, const char *msg, uint8_t *data, size_t
     }
     ESP_LOGI(tag, "%s", buf);
 }
+*/
 
 /**
  * @brief i2c master initialization
@@ -163,8 +167,8 @@ static esp_err_t lcd_send_i2c_4bit(uint8_t *data, size_t size, uint8_t register_
         if (gBackLight_en) *pWrite |= LCD_BACKLIGHT;            
     }
     data4bit_size = pWrite - data4bit;
-    logDumpBytes(TAG, "lcd_send_i2c original 8bit:", data, size);
-    logDumpBytes(TAG, "lcd_send_i2c_4bit: ", data4bit, data4bit_size);
+    // logDumpBytes(TAG, "lcd_send_i2c original 8bit:", data, size);
+    // logDumpBytes(TAG, "lcd_send_i2c_4bit: ", data4bit, data4bit_size);
     ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, data4bit, data4bit_size, I2C_MASTER_TIMEOUT_TICKS);
     if (buf_malloced)
         free(data4bit);
@@ -188,10 +192,10 @@ static esp_err_t lcd_set_4bit_mode(void)
         // now in 4 bit mode
     };
     ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_TICKS);
-    logDumpBytes(TAG, "init LCD setting bit mode",write_buf, sizeof(write_buf));
+    // logDumpBytes(TAG, "init LCD setting bit mode",write_buf, sizeof(write_buf));
     vTaskDelay(2); // wait more than 4.1ms
     ret = i2c_master_write_to_device(I2C_MASTER_NUM, LCD_DISPLAY_ADDR, write_buf2, sizeof(write_buf2), I2C_MASTER_TIMEOUT_TICKS);
-    logDumpBytes(TAG, "init LCD setting bit mode pt2",write_buf2, sizeof(write_buf2));
+    // logDumpBytes(TAG, "init LCD setting bit mode pt2",write_buf2, sizeof(write_buf2));
     return ret;
 }
 
@@ -238,6 +242,7 @@ void app_main(void)
     if (err != ESP_OK) ESP_LOGE(TAG, "Error x%x setting 4 bit mode", err);
     err = lcd_init_display();
     if (err != ESP_OK) ESP_LOGE(TAG, "Error x%x initializing display", err);
+    stepper_motor_init(0);
     while (true)
     {
         char line1[40];
@@ -263,6 +268,7 @@ void app_main(void)
         {   vTaskDelay(2); 
         }
         lineCount++;
+        stepper_motor_step(lineCount * (lineCount % 2 ? 1 : -1));
     }
 
     ESP_ERROR_CHECK(i2c_driver_delete(I2C_MASTER_NUM));

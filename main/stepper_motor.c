@@ -8,59 +8,75 @@
    Blue: Coil 4
    The wires do not come out of the motor in the same order as various pictures, but the colours match.
 
-   Wires from my ULN2003 driver board
-   Yellow: IN1 -> GPIO 34 -> Blue -> coil 4
-   White: IN2 -> GPIO 35 -> Pink -> coil 2
-   Red: IN3 -> GPIO 32 -> Yellow -> coil 3
-   Black: IN4 -> GPIO 33 -> Orange -> coil 1
+  Maybe the wiring through the ULN2003 board might put the coils in order IN1, IN2, IN3, IN4.
+  The lihts on the ULN2003 board are lit when low voltage, and one light doesn't work. the motor gets
+  5v supply (no 0v) and the 4 coil lines, active low.
+
+
 */
 
 #include <stdio.h>
 #include "esp_log.h"
+#include "driver/gpio.h"
+#include "esp_timer.h"
 
-static uint8_t motor_coil_io[4] = { 33, 35, 34, 32 };
+static gpio_num_t motor_coil_io[4] = { GPIO_NUM_32, GPIO_NUM_33, GPIO_NUM_25, GPIO_NUM_26 };
 
 static const char *TAG = "stepper_motor";
 
 static int steps_to_go = 0;
-static uint32_t step_delay_us = 1000000 / 120 / 4; /* 120 steps per second, 4 coils */
+/* 60 x all-coil steps per second, 4 coils. It does not turn reliably at 120 all-coil steps.
+   Data sheet doesn't give a maximum speed, but pwoer consumption was measured at 120Hz */
+static uint64_t step_delay_us = ( 1000000 / 60 / 4 ); 
 
-void stepper_motor_init(uint32_t step_delay_us_param)
+
+void stepper_motor_init(uint64_t step_delay_us_param)
 {
-    ESP_LOGI(TAG, "stepper_motor_init");
+    if (step_delay_us_param != 0) step_delay_us = step_delay_us_param;
+    ESP_LOGI(TAG, "stepper_motor_init, delay = %llu", (uint64_t) step_delay_us);
     for (int i = 0; i < 4; i++) {
-        gpio_pad_select_gpio(motor_coil_io[i]);
+        gpio_reset_pin(motor_coil_io[i]);
         gpio_set_direction(motor_coil_io[i], GPIO_MODE_OUTPUT);
-        gpio_set_level(motor_coil_io[i], 1); /* 1 = not energised, cf 5v supply */
+        gpio_set_level(motor_coil_io[i], 0); /* 1 = not energised, cf 5v supply */
     }
     esp_timer_init();
-    step_delay_us = step_delay_us_param;
-    // esp_timer_create(
+}
+
+uint8_t waitUs(uint64_t us)
+{
+    uint64_t start = esp_timer_get_time();
+    while (esp_timer_get_time() >= start && (esp_timer_get_time() - start) < us) {
+        ;
+    }
+    return 0;
 }
 
 void stepper_motor_step(int steps)
 {
-    ESP_LOGI(TAG, "stepper_motor_step %d", steps);
-    steps_to_go += steps;
-    /* turn the motor in this function, blocking */
-      while (steps_to_go != 0) {
-         if (steps_to_go > 0) {
-               /* turn clockwise */
-               for (int i = 0; i < 4; i++) {
-                  gpio_set_level(motor_coil_io[i], 0);
-                  // esp_timer delay step_delay_us
-                  vTaskDelay(1 / portTICK_PERIOD_MS);
-                  gpio_set_level(motor_coil_io[i], 1);
-               }
-               steps_to_go--;
-         } else {
-               /* turn anticlockwise */
-               for (int i = 3; i >= 0; i--) {
-                  gpio_set_level(motor_coil_io[i], 0);
-                  vTaskDelay(1 / portTICK_PERIOD_MS);
-                  gpio_set_level(motor_coil_io[i], 1);
-               }
-               steps_to_go++;
-         }
+   ESP_LOGI(TAG, "stepper_motor_step %d, delay %llu", steps, step_delay_us);
+   steps_to_go += steps;
+   /* turn the motor in this function, blocking, simple logic counts whole steps and reverts
+       all IOs to high afterwards,  */
+   while (steps_to_go != 0) {
+      if (steps_to_go > 0) {
+            /* turn clockwise */
+            for (int i = 0; i < 4; i++) {
+               gpio_set_level(motor_coil_io[i], 1);
+               waitUs(step_delay_us);
+               gpio_set_level(motor_coil_io[i], 0);
+            }
+            steps_to_go--;
+      } else {
+            /* turn anticlockwise */
+            for (int i = 3; i >= 0; i--) {
+               gpio_set_level(motor_coil_io[i], 1);
+               waitUs(step_delay_us);
+               gpio_set_level(motor_coil_io[i], 0);
+            }
+            steps_to_go++;
       }
+   }
+   for (int i = 0; i < 4; i++) {
+        gpio_set_level(motor_coil_io[i], 0); /* 1 = not energised, cf 5v supply */
+   }
 }
