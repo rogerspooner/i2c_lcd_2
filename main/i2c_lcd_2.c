@@ -19,34 +19,13 @@
 #include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
+#include "esp_err.h"
 #include "driver/i2c.h"
 #include <rom/ets_sys.h>
+#include "i2c_lcd_2.h"
 
-#include "stepper_motor.h"
-
-static const char *TAG = "i2c-simple-example";
-
-#define I2C_MASTER_NUM              0                          /*!< I2C master i2c port number, the number of i2c peripheral interfaces available will depend on the chip */
-#define I2C_MASTER_FREQ_HZ          40000                     /*!< I2C master clock frequency */
-#define I2C_MASTER_TX_BUF_DISABLE   0                          /*!< I2C master doesn't need buffer */
-#define I2C_MASTER_RX_BUF_DISABLE   0                          /*!< I2C master doesn't need buffer */
-#define I2C_MASTER_TIMEOUT_TICKS       1
-
-#define LCD_DISPLAY_ADDR                    0x27        /*!< Slave address of the LCD display */
-#define LCD_ENABLECLOCK_4BIT                0x04        /* Flag for enable (clock) bit in mapping in HLF8574T chip to LCD adaptor */
-#define LCD_READWRITE_4BIT                  0x02        /* Flag for read/write bit in mapping in HLF8574T chip to LCD adaptor */
-#define LCD_REGISTER_SELECT_4BIT            0x01        /* Flag for register select bit in mapping in HLF8574T chip to LCD adaptor */
-#define LCD_COMMAND_REGISTER                0x00        /* Flag for command register in mapping in 1602 LCD */
-#define LCD_DATA_REGISTER                   0x01        /* Flag for data register in mapping in 1602 LCD */
-#define LCD_BACKLIGHT                       0x08        /* P3 of the i2c expander chip goes to the light. */
-
-#define I2C_MASTER_SCL_IO           22      /*!< GPIO number used for I2C master clock */
-#define I2C_MASTER_SDA_IO           21      /*!< GPIO number used for I2C master data  */
-#define BLACK_BUTTON_GPIO 0
-#define GREEN_LED_GPIO 5
-
-bool gBackLight_en = 1;
-int lineCount = 0;
+static const char *TAG = "lcd_i2c";
+static bool gBackLight_en;
 
 /*
 // example of use: (TAG, "lcd_send_i2c_4bit", data4bit, data4bit_size);
@@ -70,9 +49,10 @@ static void logDumpBytes(const char *tag, const char *msg, uint8_t *data, size_t
 /**
  * @brief i2c master initialization
  */
-static esp_err_t i2c_master_init(void)
+esp_err_t i2c_master_init(void)
 {
     int i2c_master_port = I2C_MASTER_NUM;
+    gBackLight_en = true;
 
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
@@ -117,7 +97,7 @@ static esp_err_t i2c_master_init(void)
     - https://forum.microchip.com/s/topic/a5C3l000000MYoLEAW/t363873
     - https://github.com/fdebrabander/Arduino-LiquidCrystal-I2C-library/blob/master/LiquidCrystal_I2C.cpp#L233
     */
-static esp_err_t lcd_send_i2c_4bit(uint8_t *data, size_t size, uint8_t register_select)
+esp_err_t lcd_send_i2c_4bit(uint8_t *data, size_t size, uint8_t register_select)
 {
 #define INITIAL_DATA4BIT_SIZE 256
     esp_err_t ret;
@@ -175,7 +155,7 @@ static esp_err_t lcd_send_i2c_4bit(uint8_t *data, size_t size, uint8_t register_
     return ret;
 }
 
-static esp_err_t lcd_set_4bit_mode(void)
+esp_err_t lcd_set_4bit_mode(void)
 {
     esp_err_t ret;
     uint8_t write_buf[] = {
@@ -199,7 +179,7 @@ static esp_err_t lcd_set_4bit_mode(void)
     return ret;
 }
 
-static esp_err_t lcd_init_display(void)
+esp_err_t lcd_init_display(void)
 {   esp_err_t ret;
     uint8_t init_buf[] = {
          0x28  // Function Set 4 bit mode again to reconfigure line size and font. N=1 > 2 line display. F=0 => 5x8 pixel chars
@@ -214,8 +194,7 @@ static esp_err_t lcd_init_display(void)
     return ret;
 }
 
-
-static esp_err_t lcd_write(char *str,int linenum)
+esp_err_t lcd_write(char *str,int linenum)
 {
     esp_err_t ret;
     if (strlen(str) > 40) return ESP_ERR_INVALID_SIZE;
@@ -228,49 +207,9 @@ static esp_err_t lcd_write(char *str,int linenum)
     return ret;
 }
 
-void app_main(void)
+esp_err_t i2c_lcd_deinit(void)
 {
-    esp_err_t err;
-    err = i2c_master_init();
-    if (err != ESP_OK)
-    { ESP_LOGE(TAG, "Error x%x initializing I2C", err);
-    }
-    gpio_set_direction(GREEN_LED_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_level(GREEN_LED_GPIO, 1);
-    ESP_LOGI(TAG, "Setting 4 bit mode on LCD by I2C");
-    err = lcd_set_4bit_mode();
-    if (err != ESP_OK) ESP_LOGE(TAG, "Error x%x setting 4 bit mode", err);
-    err = lcd_init_display();
-    if (err != ESP_OK) ESP_LOGE(TAG, "Error x%x initializing display", err);
-    stepper_motor_init(0);
-    while (true)
-    {
-        char line1[40];
-        sprintf(line1, "Ahoy Roger %d", lineCount);
-        err = lcd_write(line1,0);
-        err = lcd_write("Press the button", 1);
-        if (err != ESP_OK)
-        { ESP_LOGE(TAG, "Error x%x writing to display", err);
-        }
-        else {
-           ESP_LOGI(TAG, "Wrote to display");
-        }
-        gpio_set_level(GREEN_LED_GPIO, 0); // active low
-        gpio_set_direction(BLACK_BUTTON_GPIO, GPIO_MODE_INPUT);
-        gpio_pullup_en(BLACK_BUTTON_GPIO);
-        ESP_LOGI(TAG, "Press the black button again");
-        while (gpio_get_level(BLACK_BUTTON_GPIO) == 1) // wait for button press
-        { vTaskDelay(10); 
-        }
-        gpio_set_level(GREEN_LED_GPIO, 1); // active low
-        vTaskDelay(2);  // debounce
-        while (gpio_get_level(BLACK_BUTTON_GPIO) == 0) // wait for button release
-        {   vTaskDelay(2); 
-        }
-        lineCount++;
-        stepper_motor_step(lineCount * (lineCount % 2 ? 1 : -1));
-    }
-
     ESP_ERROR_CHECK(i2c_driver_delete(I2C_MASTER_NUM));
-    ESP_LOGI(TAG, "I2C de-initialized successfully");
+    ESP_LOGI(TAG, "I2C de-initialized");
+    return ESP_OK;
 }
