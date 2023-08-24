@@ -14,6 +14,7 @@
 
 #define BLACK_BUTTON_GPIO 0
 #define GREEN_LED_GPIO 5
+// We use many GPIOs in keyboard_scan.c
 #define LOG_TAG "main"
 
 static int lineCount;
@@ -37,7 +38,11 @@ void app_main(void)
     if (err != ESP_OK) ESP_LOGE(LOG_TAG, "Error x%x setting 4 bit mode", err);
     err = lcd_init_display();
     if (err != ESP_OK) ESP_LOGE(LOG_TAG, "Error x%x initializing display", err);
-    stepper_motor_init(0);
+    // stepper_motor_init(0);
+    err = keyboard_init();
+    if (err != ESP_OK)
+    { ESP_LOGE(LOG_TAG, "Error x%x initializing keyboard", err);
+    }
     while (true)
     {
         char line1[40];
@@ -50,6 +55,8 @@ void app_main(void)
         else {
            ESP_LOGI(LOG_TAG, "Wrote to display");
         }
+        keyboard_scan();
+        
         gpio_set_level(GREEN_LED_GPIO, 0); // active low
         gpio_set_direction(BLACK_BUTTON_GPIO, GPIO_MODE_INPUT);
         gpio_pullup_en(BLACK_BUTTON_GPIO);
@@ -63,7 +70,7 @@ void app_main(void)
         {   vTaskDelay(2); 
         }
         lineCount++;
-        stepper_motor_step(lineCount * (lineCount % 2 ? 1 : -1));
+        // stepper_motor_step(lineCount * (lineCount % 2 ? 1 : -1));
     }
     i2c_lcd_deinit();
 }

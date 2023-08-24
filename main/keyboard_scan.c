@@ -32,8 +32,8 @@ Loop:
 #define KEYBOARD_ROWS 4
 #define KEYBOARD_COLS 4
 #define KEY_DEBOUNCE_DELAY 3 /* measured in scan iterations */
-static gpio_num_t keyboard_row_io[KEYBOARD_ROWS] = { GPIO_NUM_25, GPIO_NUM_26, GPIO_NUM_27, GPIO_NUM_14 };
-static gpio_num_t keyboard_col_io[KEYBOARD_COLS] = { GPIO_NUM_34, GPIO_NUM_35, GPIO_NUM_32, GPIO_NUM_33 };
+static gpio_num_t keyboard_col_io[KEYBOARD_ROWS] = { GPIO_NUM_25, GPIO_NUM_26, GPIO_NUM_27, GPIO_NUM_14 };
+static gpio_num_t keyboard_row_io[KEYBOARD_COLS] = { GPIO_NUM_34, GPIO_NUM_35, GPIO_NUM_32, GPIO_NUM_33 }; // some can't be outputs
 static int key_last_changed_time[KEYBOARD_COLS][KEYBOARD_ROWS];
 static uint8_t keys_down[2][KEYBOARD_COLS][KEYBOARD_ROWS];
 static int scan_index = 0;
@@ -43,15 +43,19 @@ static const char *TAG = "keyboard_scan";
 
 esp_err_t keyboard_init()
 {
+    esp_err_t err;
+    bool any_err = false;
     ESP_LOGI(TAG, "keyboard_init");
     for (int row = 0; row < KEYBOARD_ROWS; row++) {
         gpio_reset_pin(keyboard_row_io[row]);
-        gpio_set_direction(keyboard_row_io[row], GPIO_MODE_INPUT);
+        err = gpio_set_direction(keyboard_row_io[row], GPIO_MODE_INPUT);
+        if (err) any_err = true;
         gpio_set_pull_mode(keyboard_row_io[row], GPIO_PULLDOWN_ONLY);
     }
     for (int col = 0; col < KEYBOARD_COLS; col++) {
         gpio_reset_pin(keyboard_col_io[col]);
-        gpio_set_direction(keyboard_col_io[col], GPIO_MODE_INPUT);
+        err = gpio_set_direction(keyboard_col_io[col], GPIO_MODE_INPUT);
+        if (err) any_err = true;
         gpio_set_pull_mode(keyboard_col_io[col], GPIO_PULLDOWN_ONLY);
     }
      for (int col = 0; col < KEYBOARD_COLS; col++) {
@@ -63,6 +67,10 @@ esp_err_t keyboard_init()
         reset_keys_down(k);
     keys_down_index = 0;
     scan_index = 0;
+    if (any_err) { 
+        ESP_LOGE(TAG, "Error in keyboard_init()");
+        return ESP_FAIL;
+    }
     return 0;
 }
 
@@ -79,6 +87,7 @@ esp_err_t keyboard_scan()
 {
     keys_down_index ^= 1;
     scan_index += 1;
+    ESP_LOGI(TAG, "keyboard_scan %d ...", scan_index);
     reset_keys_down(keys_down_index);
     int n_keys_down = 0;
     for (int col = 0; col < KEYBOARD_COLS; col++) {
