@@ -1,6 +1,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_err.h"
@@ -42,21 +43,29 @@ void app_main(void)
     err = keyboard_init();
     if (err != ESP_OK)
     { ESP_LOGE(LOG_TAG, "Error x%x initializing keyboard", err);
+       lcd_write("Error Kbd init",0);
+
+      vTaskDelay(1000);
     }
     while (true)
     {
         char line1[40];
-        sprintf(line1, "Ahoy Roger %d", lineCount);
+        sprintf(line1, "%d steps", lineCount);
         err = lcd_write(line1,0);
-        err = lcd_write("Press the button", 1);
+        keyboard_scan();
+
         if (err != ESP_OK)
         { ESP_LOGE(LOG_TAG, "Error x%x writing to display", err);
         }
         else {
            ESP_LOGI(LOG_TAG, "Wrote to display");
         }
-        keyboard_scan();
-        
+        keyboard_pressed_chars_str(line1, 40);
+        strcat(line1,"  ");
+        lcd_write(line1,1);
+        ESP_LOGI(LOG_TAG, "ch %s", line1);
+        vTaskDelay(10); /* 0.1s */
+        /*
         gpio_set_level(GREEN_LED_GPIO, 0); // active low
         gpio_set_direction(BLACK_BUTTON_GPIO, GPIO_MODE_INPUT);
         gpio_pullup_en(BLACK_BUTTON_GPIO);
@@ -69,6 +78,7 @@ void app_main(void)
         while (gpio_get_level(BLACK_BUTTON_GPIO) == 0) // wait for button release
         {   vTaskDelay(2); 
         }
+        */
         lineCount++;
         // stepper_motor_step(lineCount * (lineCount % 2 ? 1 : -1));
     }

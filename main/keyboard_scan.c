@@ -24,6 +24,12 @@ static gpio_num_t keyboard_col_io[KEYBOARD_ROWS] = { GPIO_NUM_25, GPIO_NUM_26, G
 static gpio_num_t keyboard_row_io[KEYBOARD_COLS] = { GPIO_NUM_34, GPIO_NUM_35, GPIO_NUM_32, GPIO_NUM_33 }; // some can't be outputs nor have pull-down resistors
 static int key_last_changed_time[KEYBOARD_COLS][KEYBOARD_ROWS];
 static uint8_t keys_down[2][KEYBOARD_COLS][KEYBOARD_ROWS];
+static char key_map[KEYBOARD_COLS][KEYBOARD_ROWS] = {
+    { '1', '2', '3', 'A' },
+    { '4', '5', '6', 'B' },
+    { '7', '8', '9', 'C' },
+    { '*', '0', '#', 'D' }
+};
 static int scan_index = 0;
 static int keys_down_index = 0;
 
@@ -38,13 +44,15 @@ esp_err_t keyboard_init()
         gpio_reset_pin(keyboard_col_io[col]);
         err = gpio_set_direction(keyboard_col_io[col], GPIO_MODE_INPUT);
         if (err) any_err = true;
-        gpio_set_pull_mode(keyboard_col_io[col], GPIO_PULLDOWN_ONLY); // maybe don't pulldown because we're getting a short circuit inside the ESP32
+        err = gpio_set_pull_mode(keyboard_col_io[col], GPIO_PULLDOWN_ONLY); // maybe don't pulldown because we're getting a short circuit inside the ESP32
+        if (err) any_err = true;
     }
     for (int row = 0; row < KEYBOARD_ROWS; row++) {
         gpio_reset_pin(keyboard_row_io[row]);
         err = gpio_set_direction(keyboard_row_io[row], GPIO_MODE_INPUT);
         if (err) any_err = true;
-        gpio_set_pull_mode(keyboard_row_io[row], GPIO_PULLDOWN_ONLY); // GPIO 34 has no pull-down capability. Install externally.
+        err = gpio_set_pull_mode(keyboard_row_io[row], GPIO_PULLDOWN_ONLY); // GPIO 34 has no pull-down capability. Install externally.
+        if (err) any_err = true;
     }
      for (int col = 0; col < KEYBOARD_COLS; col++) {
         for (int row = 0; row < KEYBOARD_ROWS; row++) {
@@ -111,3 +119,22 @@ esp_err_t keyboard_scan()
     }
     return 0;
 };
+
+/* @brief Return the list of pressed key characters
+*/
+esp_err_t keyboard_pressed_chars_str(char* buf, size_t buflen)
+{
+    buf[0] = 0;
+    int n = 0;
+    for (int col = 0; col < KEYBOARD_COLS; col++) {
+        for (int row = 0; row < KEYBOARD_ROWS; row++) {
+            if (keys_down[keys_down_index][col][row] == 1) {
+                if (n < buflen - 1) {
+                    buf[n++] = key_map[col][row];
+                }
+            }
+        }
+    }
+    buf[n] = 0;
+    return ESP_OK;
+}
